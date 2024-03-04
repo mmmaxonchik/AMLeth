@@ -6,7 +6,6 @@ import (
 	"strconv"
 )
 
-
 type AccountReport struct {
 	// Wallet address
 	Address string
@@ -24,15 +23,15 @@ type AccountReport struct {
 	EthVolume float64
 }
 
-func GenerateAccReport() {	
+func GenerateAccReport() {
 	weiToEth :=  func(wei uint64) float64 {
 		return float64(wei) / float64(1e18)
 	}
-	
+
 	newReport := AccountReport{}
-	
+
 	addr := "0x0945198dd98c78d88568004d775e33800cfe4bfa"
-	tnx, err := account.New(apiKey).GetNormalTnx(addr)	
+	tnx, err := account.New(apiKey).GetNormalTnx(addr)
 	if err != nil {
 		return
 	}
@@ -45,7 +44,7 @@ func GenerateAccReport() {
 		if v.To == addr {
 			newReport.TotalReceivedTnx += 1
 			wei, _ := strconv.ParseUint(v.Value, 10, 64)
-			newReport.EthVolume += weiToEth(wei)			
+			newReport.EthVolume += weiToEth(wei)
 		}
 	}
 
