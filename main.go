@@ -24,7 +24,7 @@ type AccountReport struct {
 	EthVolume float64
 }
 
-func GenerateAccReport() {
+func GenerateAccReport() {	
 	weiToEth :=  func(wei uint64) float64 {
 		return float64(wei) / float64(1e18)
 	}
