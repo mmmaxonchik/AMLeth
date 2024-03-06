@@ -2,7 +2,7 @@
 
 [Сервис предоставляющий отчеты по скаму, мошенничеству итд от пользователей](https://docs.chainabuse.com/docs/welcome-to-chainabuse-api)
 
-[Датасеты о мошшеничестве в Eth(Контракты + Кошельки)](https://github.com/forta-network/labelled-datasets/tree/main)
+[Датасеты о мошенничестве в Eth(Контракты + Кошельки)](https://github.com/forta-network/labelled-datasets/tree/main)
 
 [Ноутбук с ML](https://www.kaggle.com/code/rupakroy/fraud-detection-classifier/notebook)
 

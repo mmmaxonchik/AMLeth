@@ -1,7 +1,7 @@
 import csv
 import asyncio
 import random
-from aiohttp.client_exceptions import ClientError, ClientResponseError
+from aiohttp.client_exceptions import ClientError
 from web3 import AsyncWeb3
 import aiofiles
 

@@ -1,72 +1,147 @@
 import asyncio
-from datetime import datetime
+from aiohttp import ClientError
 from functools import reduce
 from etherscan_sdk.account_sdk import get_normal_transactions
 from etherscan_sdk.account_sdk import get_ether_balance
 from etherscan_sdk.account_sdk import get_internal_transactions
 from etherscan_sdk.account_sdk import get_erc20_transactions
+from web3 import AsyncWeb3
+from random import randint
+
+nets = [
+    "https://eth.drpc.org",
+    "https://eth-pokt.nodies.app",
+    "https://rpc.mevblocker.io",
+    "https://cloudflare-eth.com",
+    "https://rpc.mevblocker.io"
+]
 
 
-async def get_wallet_dataset(addr: str):
+async def _is_wallet(addr: str):
+    w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(
+        nets[randint(0, len(nets)-1)]
+    ))
+
+    try:
+        checksum_addr = w3.to_checksum_address(addr)
+        code = await w3.eth.get_code(checksum_addr)
+    except Exception as err:
+        if isinstance(err, ClientError):
+            await _is_wallet(addr)
+        print(err)
+        return
+
+    return code.hex() == "0x"
+
+
+def _time_btw_txns(txns):
+    txns_timestamps = list(map(
+        lambda txn: int(txn["timeStamp"]),
+        txns
+    ))
+    txns_timestamps.sort()
+
+    if len(txns_timestamps) < 2:
+        return [0, 0, 0]
+
+    min_time = txns_timestamps[1]-txns_timestamps[0]
+    for i in range(0, len(txns_timestamps)):
+        if i == len(txns_timestamps)-1:
+            break
+        it_res = txns_timestamps[i+1]-txns_timestamps[i]
+        if min_time > it_res:
+            min_time = it_res
+
+    avg_time = 0
+    for i in range(len(txns_timestamps)-1, -1, -1):
+        if i == 0:
+            break
+        avg_time += txns_timestamps[i]-txns_timestamps[i-1]
+    avg_time /= len(txns_timestamps)
+
+    max_time = txns_timestamps[1]-txns_timestamps[0]
+    for i in range(0, len(txns_timestamps)):
+        if i == len(txns_timestamps)-1:
+            break
+        it_res = txns_timestamps[i+1]-txns_timestamps[i]
+        if max_time < it_res:
+            max_time = it_res
+
+    return [min_time, round(avg_time), max_time]
+
+
+def _make_uniq(txns):
+    uniq_txns = {txn["hash"].lower(): txn for txn in txns}
+    return list(uniq_txns.values())
+
+
+async def create_wallet_report(addr: str):
     # balance = await get_ether_balance(addr)
     normal_txns = await get_normal_transactions(
         addr
     )
+    normal_txns = _make_uniq(normal_txns)
+
     internal_txns = await get_internal_transactions(addr)
+    internal_txns = _make_uniq(internal_txns)
+
     erc20_txns = await get_erc20_transactions(addr)
-
-    all_txns_types = erc20_txns + internal_txns + erc20_txns
-
-    dataset = dict()
-
-    # Количество обычных(normal) транзакций
-    dataset["Normal_Txns"] = len(normal_txns)
+    erc20_txns = _make_uniq(erc20_txns)
 
     # Обычные транзакции с кошельками
     normal_wallets_txns = list(
         filter(lambda txn: txn["methodId"] == "0x", normal_txns)
     )
 
+    async def filter_txns(txns, place):
+        filtered_txns = []
+        for txn in txns:
+            if not await _is_wallet(txn[place]):
+                filtered_txns.append(txn)
+        return filtered_txns
+
     # Обычные транзакции со смарт-контрактами
-    smart_contract_txns = list(
-        filter(lambda txn: txn["methodId"] != "0x", normal_txns)
+    smart_contract_txns_out = await filter_txns(normal_txns, "to")
+
+    smart_contract_txns_in = await filter_txns(normal_txns, "from")
+
+    smart_contract_txns = smart_contract_txns_out + smart_contract_txns_in
+
+    # Все транзакции
+    all_txns = _make_uniq(normal_txns+internal_txns+erc20_txns)
+
+    ### Заполнение отчета ###
+    report = dict()
+
+    # Время между всеми обычными транзакциями(минимальное, среднее, максимальное)
+    report["Min_Time_Btw_Normal_Txns"], report["Avg_Time_Btw_Normal_Txns"], report["Max_Time_Btw_Normal_Txns"] = _time_btw_txns(
+        normal_txns
     )
 
-    # Метки времени для всех транзакций
-    txns_timestamps = list(map(
-        lambda txn: int(txn["timeStamp"]),
-        all_txns_types
-    ))
-
-    # Время жизни кошелька от первой транзакции до последней
-    wallet_life = datetime.fromtimestamp(
-        max(txns_timestamps)
-    ) - datetime.fromtimestamp(
-        min(txns_timestamps)
+    # Время между внутренними транзакциями(минимальное, среднее, максимальное)
+    report["Min_Time_Btw_Internal_Txns"], report["Avg_Time_Btw_Internal_Txns"], report["Max_Time_Btw_Internal_Txns"] = _time_btw_txns(
+        internal_txns
     )
 
-    # Время жизни кошелька от первой транзакции до последней(в секундах)
-    dataset["Wallet_Lifetime"] = wallet_life.total_seconds()
+    # Время между транзакциями с ERC20(минимальное, среднее, максимальное)
+    report["Min_Time_Btw_ERC20_Txns"], report["Avg_Time_Btw_ERC20_Txns"], report["Max_Time_Btw_ERC20_Txns"] = _time_btw_txns(
+        erc20_txns
+    )
 
-    # Среднее количество транзакций в день
-    dataset["Avg_txns_per_day"] = round(wallet_life.days / len(all_txns_types))
+    # Количество всех транзакций
+    report["Txns"] = len(all_txns)
 
-    filtered_txns_by_timeStamp = {
-        timeStamp: list(filter(lambda txn: txn["timeStamp"] == str(
-            timeStamp), all_txns_types))
-        for timeStamp in txns_timestamps
-    }
+    # Количество обычных(normal) транзакций
+    report["Normal_Txns"] = len(normal_txns)
 
-    # # Максимальное количество транзакций в день
-    # dataset["Max_txns_per_day"] = sorted(
-    #     filtered_txns_by_timeStamp.items(),
-    #     key=lambda pair: len(pair[1]),
-    # )
+    # Количество внутренних(internal) транзакций
+    report["Internal_Txns"] = len(internal_txns)
 
-    # print(filtered_txns_by_timeStamp)
+    # Количество транзакций со стандартом токена ERC20
+    report["ERC20_Txns"] = len(erc20_txns)
 
     # Общий объем Eth пропущенного через кошелек
-    dataset["Eth_Volume"] = reduce(
+    report["Eth_Volume"] = reduce(
         lambda a, b: a+b,
         map(
             lambda txn: int(txn["value"])/1e18,
@@ -76,10 +151,10 @@ async def get_wallet_dataset(addr: str):
     )
 
     # Количество транзакций с кошельками
-    dataset["Wallet_Contract_Txns"] = len(normal_wallets_txns)
+    report["Wallet_Txns"] = len(normal_wallets_txns)
 
-    # Количество транзакций с кошельками инициированных отправителем
-    dataset["Wallet_Contract_Txns_In"] = len(
+    # Количество транзакций с кошельками инициированных иным кошельком
+    report["Wallet_Txns_In"] = len(
         list(
             filter(
                 lambda txn: txn["to"].lower() == addr.lower(),
@@ -89,32 +164,34 @@ async def get_wallet_dataset(addr: str):
     )
 
     # Количество транзакций с кошельками инициированных владельцем
-    dataset["Wallet_Contract_Txns_Out"] = dataset["Wallet_Contract_Txns"] - \
-        dataset["Wallet_Contract_Txns_In"]
+    report["Wallet_Txns_Out"] = report["Wallet_Txns"] - \
+        report["Wallet_Txns_In"]
 
     # Количество транзакций со смарт-контрактами
-    dataset["Smart_Contract_Txns"] = len(smart_contract_txns)
+    report["Smart_Contract_Txns"] = len(smart_contract_txns)
 
     # Количество транзакций со смарт-контрактами инициированных контрактом
-    dataset["Smart_Contract_Txns_In"] = len(
-        list(
-            filter(
-                lambda txn: txn["to"].lower() == addr.lower(),
-                smart_contract_txns
-            )
-        )
+    report["Smart_Contract_Txns_In"] = len(
+        smart_contract_txns_in
     )
 
     # Количество транзакций со смарт-контрактами инициированных кошельком
-    dataset["Smart_Contract_Txns_Out"] = dataset["Smart_Contract_Txns"] - \
-        dataset["Smart_Contract_Txns_In"]
+    report["Smart_Contract_Txns_Out"] = len(
+        smart_contract_txns_out
+    )
 
-    print(dataset)
+    # Количество созданных адресов
+    # Общее количество транзакций с уникальными адресами(total, in, out)
+    # Количество (normal, internal, erc20)транзакций с уникальными адресами(total, in, out)
+    # Минимальное/Среднее/Максимальное количество отправленного Eth в одной транзакции
+    #
+
+    print(report)
 
 
 async def main():
-    txns = await get_wallet_dataset(
-        "0xb961F2a5eeD42fc1607f4Fb795EF6D36D341CD56"
+    txns = await create_wallet_report(
+        "0xE84774afe41f7d76188Cc78605d50FBd677fa1D3"
     )
 
 if __name__ == "__main__":
