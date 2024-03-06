@@ -1,8 +1,7 @@
-import json
 from aiohttp import ClientSession
 from yarl import URL
 
-apikey: str = ""
+apikey: str = "XPS2VR66MZ2YZE1G1WBAM8S3FA6NN8VD13"
 module: str = "account"
 api_url: URL = URL("https://api.etherscan.io/api").update_query(
     {"module": module, "apikey": apikey}

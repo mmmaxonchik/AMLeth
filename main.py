@@ -17,6 +17,29 @@ nets = [
 ]
 
 
+def _wei_to_eth(wei):
+    return wei/1e18
+
+
+def _get_uniq_addr(txns):
+    uniq_addr = set(
+        map(lambda txn: txn["from"], txns)
+    ).union(map(lambda txn: txn["to"], txns))
+    return uniq_addr
+
+
+def _eth_distr(txns, place, addr):
+    eth_in_txns = list(
+        map(
+            lambda txn: _wei_to_eth(int(txn["value"])),
+            filter(lambda txn: txn[place] == addr, txns)
+        )
+    )
+    if not len(eth_in_txns):
+        return [0, 0, 0]
+    return [min(eth_in_txns), sum(eth_in_txns)/len(eth_in_txns), max(eth_in_txns)]
+
+
 async def _is_wallet(addr: str):
     w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(
         nets[randint(0, len(nets)-1)]
@@ -70,23 +93,28 @@ def _time_btw_txns(txns):
     return [min_time, round(avg_time), max_time]
 
 
-def _make_uniq(txns):
+def _make_uniq_and_filter(txns):
     uniq_txns = {txn["hash"].lower(): txn for txn in txns}
-    return list(uniq_txns.values())
+    uniq_txns = list(uniq_txns.values())
+    for txn in uniq_txns:
+        txn["from"] = txn["from"].lower()
+        txn["to"] = txn["to"].lower()
+    return uniq_txns
 
 
 async def create_wallet_report(addr: str):
+    addr = addr.lower()
     # balance = await get_ether_balance(addr)
     normal_txns = await get_normal_transactions(
         addr
     )
-    normal_txns = _make_uniq(normal_txns)
+    normal_txns = _make_uniq_and_filter(normal_txns)
 
     internal_txns = await get_internal_transactions(addr)
-    internal_txns = _make_uniq(internal_txns)
+    internal_txns = _make_uniq_and_filter(internal_txns)
 
     erc20_txns = await get_erc20_transactions(addr)
-    erc20_txns = _make_uniq(erc20_txns)
+    erc20_txns = _make_uniq_and_filter(erc20_txns)
 
     # Обычные транзакции с кошельками
     normal_wallets_txns = list(
@@ -108,9 +136,14 @@ async def create_wallet_report(addr: str):
     smart_contract_txns = smart_contract_txns_out + smart_contract_txns_in
 
     # Все транзакции
-    all_txns = _make_uniq(normal_txns+internal_txns+erc20_txns)
+    all_txns = _make_uniq_and_filter(normal_txns+internal_txns+erc20_txns)
 
-    ### Заполнение отчета ###
+    txns_timestamps = list(sorted(map(
+        lambda txn: int(txn["timeStamp"]),
+        all_txns
+    )))
+
+    ###### Заполнение отчета ######
     report = dict()
 
     # Время между всеми обычными транзакциями(минимальное, среднее, максимальное)
@@ -144,7 +177,7 @@ async def create_wallet_report(addr: str):
     report["Eth_Volume"] = reduce(
         lambda a, b: a+b,
         map(
-            lambda txn: int(txn["value"])/1e18,
+            lambda txn: _wei_to_eth(int(txn["value"])),
             normal_txns
         ),
         0
@@ -157,7 +190,7 @@ async def create_wallet_report(addr: str):
     report["Wallet_Txns_In"] = len(
         list(
             filter(
-                lambda txn: txn["to"].lower() == addr.lower(),
+                lambda txn: txn["to"] == addr,
                 normal_wallets_txns
             )
         )
@@ -180,11 +213,34 @@ async def create_wallet_report(addr: str):
         smart_contract_txns_out
     )
 
-    # Количество созданных адресов
-    # Общее количество транзакций с уникальными адресами(total, in, out)
-    # Количество (normal, internal, erc20)транзакций с уникальными адресами(total, in, out)
-    # Минимальное/Среднее/Максимальное количество отправленного Eth в одной транзакции
-    #
+    # Минимальное/Среднее/Максимальное количество отправленного Ethereum
+    report["Min_Eth_Send_By_Txn"], report["Avg_Eth_Send_By_Txn"], report["Max_Eth_Send_By_Txn"] = _eth_distr(
+        normal_txns, "from", addr
+    )
+
+    # Минимальное/Среднее/Максимальное количество полученного Ethereum
+    report["Min_Eth_Get_By_Txn"], report["Avg_Eth_Get_By_Txn"], report["Max_Eth_Get_By_Txn"] = _eth_distr(
+        normal_txns, "to", addr
+    )
+
+    # Общее количество транзакций с уникальными адресами
+    report["Txns_With_Uniq_Addr"] = len(_get_uniq_addr(all_txns))-1
+
+    # Количество обычных транзакций с уникальными адресами
+    report["Normal_Txns_With_Uniq_Addr"] = len(_get_uniq_addr(normal_txns))-1
+
+    # Количество внутренних транзакций с уникальными адресами
+    report["Internal_Txns_With_Uniq_Addr"] = len(
+        _get_uniq_addr(internal_txns)
+    )-1
+
+    # Количество транзакций с ERC20 токенами с уникальными адресами
+    report["ERC20_Txns_With_Uniq_Addr"] = len(_get_uniq_addr(erc20_txns))-1
+
+    # Разница между первой и последней транзакцией
+    report["Time_Btw_FTxn_LTxn"] = (
+        txns_timestamps[-1]-txns_timestamps[0]
+    )*1000
 
     print(report)
 
