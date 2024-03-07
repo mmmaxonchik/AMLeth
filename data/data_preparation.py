@@ -41,7 +41,7 @@ async def is_wallet(addr: str, queue: asyncio.Queue, FLAG: str, sleep: int):
     except Exception as err:
         if isinstance(err, ClientError):
             print("Make recursive")
-            is_wallet(addr, queue, FLAG, sleep)
+            await is_wallet(addr, queue, FLAG, sleep)
         print(err)
         return
 
