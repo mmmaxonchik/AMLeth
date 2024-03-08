@@ -24,9 +24,12 @@ class WalletReport:
     Eth_Volume: float
     Sent_Eth: float
     Received_Eth: float
-    ERC20_Volume: int
-    Sent_ERC20: int
-    Received_ERC20: int
+    ERC20_Volume: float
+    Sent_ERC20: float
+    Received_ERC20: float
+    Stable_Coin_Volume: float
+    Sent_Stable_Coin: float
+    Received_Stable_Coin: float
     # Internal_Txns: int
     # ERC20_txns: int
     # Eth_Volume: float
@@ -190,16 +193,21 @@ class Wallet:
     async def get_report(self) -> WalletReport:
         await self._prepared_data()
 
-        def sender(txn): return self._is_eq_addr(txn.from_, self.address)
-        def receiver(txn): return self._is_eq_addr(txn.to_, self.address)
+        # Filters
+        def sender(txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
+            txn.from_, self.address)
 
+        def receiver(txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
+            txn.to_, self.address)
+
+        def stable_coin(txn: ERC20TransferEvent):
+            return txn.contract_address.lower() in list(map(str.lower, self.stable_coins_smrt_cntrs))
+
+        # Data mappers
         def eth_value(txn): return int(txn.value)/1e18
-        def erc20_value(txn): return int(txn.value)
 
-        def stable_coin_value(txn: ERC20TransferEvent): return int(
-            txn.value)/int(txn.token_decimal)
-
-        print(sum(map(erc20_value, filter(sender, self.erc20_events))))
+        def erc20_value(txn: ERC20TransferEvent): return int(
+            txn.value)/10**int(txn.token_decimal)
 
         # self._get_stable_coin_info()
 
@@ -308,9 +316,17 @@ class Wallet:
             sum(map(erc20_value, self.erc20_events)),
             sum(map(erc20_value, filter(sender, self.erc20_events))),
             sum(map(erc20_value, filter(receiver, self.erc20_events))),
-            sum(map(stable_coin_value, self.erc20_events)),
-            sum(map(stable_coin_value, filter(sender, self.erc20_events))),
-            sum(map(stable_coin_value, filter(receiver, self.erc20_events))),
+            sum(map(erc20_value, filter(stable_coin, self.erc20_events))),
+            sum(
+                map(erc20_value, filter(
+                    sender, filter(stable_coin, self.erc20_events)
+                ))
+            ),
+            sum(
+                map(erc20_value, filter(
+                    receiver, filter(stable_coin, self.erc20_events)
+                ))
+            ),
 
 
             # len(self.internal_txns),
