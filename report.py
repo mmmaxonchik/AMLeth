@@ -3,10 +3,12 @@ import asyncio
 from functools import reduce
 import os
 from random import randint
+from sre_constants import SUCCESS
 from typing import List, Sequence, Tuple
 from aiohttp import ClientError
 
 from attr import dataclass
+from sympy import false, true
 from web3 import AsyncWeb3
 from etherscan_sdk.sdk import Account
 from etherscan_sdk.sdk_type import ERC20TransferEvent, NormalTransaction, Transaction
@@ -14,6 +16,7 @@ from etherscan_sdk.sdk_type import ERC20TransferEvent, NormalTransaction, Transa
 
 @dataclass
 class WalletReport:
+    # Countable data
     Normal_Txns: int
     Normal_Sent_txns: int
     Normal_Received_txns: int
@@ -21,6 +24,7 @@ class WalletReport:
     ERC20_Sent_txns: int
     ERC20_Received_txns: int
     Internal_Txn: int
+    # Currency and token data
     Eth_Volume: float
     Sent_Eth: float
     Received_Eth: float
@@ -30,6 +34,7 @@ class WalletReport:
     Stable_Coin_Volume: float
     Sent_Stable_Coin: float
     Received_Stable_Coin: float
+    # Time data
     First_Txn_Timestamp: int
     Last_Txn_Timestamp: int
     Wallet_LifeTime: int
@@ -42,21 +47,11 @@ class WalletReport:
     Min_Time_Btw_Txns: int
     Avg_Time_Btw_Txns: int
     Max_Time_Btw_Txns: int
-    # First_Time_Txn: int
-    # Last_Time_Txn: int
-    # Deployed_SmrtCnts: int
-    # Uniq_Wallets: int
-    # Uniq_SmrtCnts: int
-    # Uniq_ERC20: int
-    # Uniq_ERC20_Wallets: int
-    # Normal_Sent_txns: int
-    # Normal_Received_txns: int
-    # Min_Time_Btw_ERC20_Txns: int
-    # Avg_Time_Btw_ERC20_Txns: int
-    # Max_Time_Btw_ERC20_Txns: int
-    # StableCoins_Volume: float
-    # Sent_StableCoins: float
-    # Received_StableCoins: float
+    # Countable data
+    Uniq_Wallet_In_Normal_Txns: int
+    Uniq_SmrtCntrs_In_Normal_Txns: int
+    Uniq_Wallet_In_ERC20_Txns: int
+    Uniq_SmrtCntrs_In_ERC20_Txns: int
 
 
 class Wallet:
@@ -82,24 +77,25 @@ class Wallet:
             "https://eth-pokt.nodies.app",
             "https://rpc.mevblocker.io",
             "https://cloudflare-eth.com",
-            "https://rpc.mevblocker.io"
             "https://mainnet.infura.io/v3/"+os.environ["INFURA_API_KEY"]
         ]
 
-        w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(
-            rpc_nodes[randint(0, len(rpc_nodes)-1)]
-        ))
+        success = False
+        code = "0x"
+        while not success:
+            w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(
+                rpc_nodes[randint(0, len(rpc_nodes)-1)]
+            ))
+            try:
+                checksum_addr = w3.to_checksum_address(address)
+                code = await w3.eth.get_code(checksum_addr)
+                code = code.hex()
+                success = True
+            except Exception as err:
+                print(err, type(err))
+                await asyncio.sleep(2)
 
-        try:
-            checksum_addr = w3.to_checksum_address(address)
-            code = await w3.eth.get_code(checksum_addr)
-        except Exception as err:
-            await asyncio.sleep(10)
-            if isinstance(err, ClientError):
-                await cls._is_wallet(address)
-            return True
-
-        return code.hex() == "0x"
+        return code == "0x"
 
     @staticmethod
     def _is_eq_addr(addr1: str, addr2: str):
@@ -109,25 +105,31 @@ class Wallet:
     def _wei_to_eth(wei: int) -> float:
         return wei/1e18
 
+    async def _txns_interaction(self, txns_list: Sequence[Transaction | ERC20TransferEvent]) -> Tuple[List[Transaction | ERC20TransferEvent], List[Transaction | ERC20TransferEvent]]:
+        wallets: List[Transaction | ERC20TransferEvent] = list()
+        smrt_cntrs: List[Transaction | ERC20TransferEvent] = list()
+
+        for txn in txns_list:
+            if self._is_eq_addr(self.address, txn.to_):
+                if await self._is_wallet(txn.from_):
+                    wallets.append(txn)
+                else:
+                    smrt_cntrs.append(txn)
+            else:
+                if await self._is_wallet(txn.to_):
+                    wallets.append(txn)
+                else:
+                    smrt_cntrs.append(txn)
+
+        return (wallets, smrt_cntrs)
+
     async def _prepared_data(self):
         self.normal_txns = await self.account.get_normal_transactions()
         self.internal_txns = await self.account.get_internal_transactions()
         self.erc20_events = await self.account.get_erc20_transfer_events()
 
-        self.wallets: List[NormalTransaction] = list()
-        self.smrt_cntrs: List[NormalTransaction] = list()
-
-        for txn in self.normal_txns:
-            if self._is_eq_addr(self.address, txn.to_):
-                if await self._is_wallet(txn.from_):
-                    self.wallets.append(txn)
-                else:
-                    self.smrt_cntrs.append(txn)
-            else:
-                if await self._is_wallet(txn.to_):
-                    self.wallets.append(txn)
-                else:
-                    self.smrt_cntrs.append(txn)
+        self.normal_txns_interaction = await self._txns_interaction(self.normal_txns)
+        self.erc20_txns_interaction = await self._txns_interaction(self.erc20_events)
 
     def _eth_volume(self, txns_list: Sequence[Transaction]) -> float:
         return reduce(
@@ -190,24 +192,34 @@ class Wallet:
 
         return (stable_coins_volume, stable_coins_sent, stable_coins_received)
 
+    def _uniq_addr(self, txns_list: Sequence[Transaction | ERC20TransferEvent]):
+        return set(map(
+            lambda txn: txn.to_.lower(),
+            filter(self.sender, txns_list)
+        )).union(map(
+            lambda txn: txn.from_.lower(),
+            filter(self.receiver, txns_list)
+        ))
+
+    # Filters
+    def sender(self, txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
+        txn.from_, self.address)
+
+    def receiver(self, txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
+        txn.to_, self.address)
+
     async def get_report(self) -> WalletReport:
         await self._prepared_data()
-
-        # Filters
-        def sender(txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
-            txn.from_, self.address)
-
-        def receiver(txn: Transaction | ERC20TransferEvent): return self._is_eq_addr(
-            txn.to_, self.address)
 
         def stable_coin(txn: ERC20TransferEvent):
             return txn.contract_address.lower() in list(map(str.lower, self.stable_coins_smrt_cntrs))
 
         # Data mappers
-        def eth_value(txn): return int(txn.value)/1e18
+        def eth_value(txn): return self._wei_to_eth(int(txn.value))
 
-        def erc20_value(txn: ERC20TransferEvent): return int(
-            txn.value)/10**int(txn.token_decimal)
+        def erc20_value(txn: ERC20TransferEvent): return (
+            int(txn.value)/10**int(txn.token_decimal)
+        )
 
         # Constant data
         txns_timestamps = self._get_txns_timestamps(
@@ -219,99 +231,29 @@ class Wallet:
             f_txn_time = txns_timestamps[0]
             l_txn_time = txns_timestamps[-1]
 
-        # uniq_smrt_cntrs = set(
-        #     map(
-        #         lambda txn: txn.to_,
-        #         filter(lambda txn: not self._is_eq_addr(
-        #             txn.to_.lower(), self.address), self.smrt_cntrs)
-        #     )
-        # ).union(set(
-        #     map(
-        #         lambda txn: txn.from_,
-        #         filter(lambda txn: not self._is_eq_addr(
-        #             txn.from_.lower(), self.address), self.smrt_cntrs)
-        #     )
-        # ))
-
-        # uniq_wallets = set(
-        #     map(
-        #         lambda txn: txn.to_.lower(),
-        #         filter(
-        #             lambda txn: not self._is_eq_addr(
-        #                 txn.to_, self.address
-        #             ), self.wallets)
-        #     )
-        # ).union(set(
-        #     map(
-        #         lambda txn: txn.from_.lower(),
-        #         filter(
-        #             lambda txn: not self._is_eq_addr(txn.from_, self.address),
-        #             self.wallets
-        #         )
-        #     )
-        # ))
-
-        # uniq_erc20_smrt_cntrs = set([
-        #     txn.contract_address.lower()
-        #     for txn in self.erc20_events
-        # ])
-
-        # uniq_erc20_wallets = set(
-        #     map(
-        #         lambda txn: txn.to_.lower(),
-        #         filter(
-        #             lambda txn: not self._is_eq_addr(
-        #                 txn.to_, self.address
-        #             ), self.erc20_events)
-        #     )
-        # ).union(set(
-        #     map(
-        #         lambda txn: txn.from_.lower(),
-        #         filter(
-        #             lambda txn: not self._is_eq_addr(txn.from_, self.address),
-        #             self.erc20_events
-        #         )
-        #     )
-        # ))
-
-        # if len(txns_time_stamps) > 1:
-        #     first_time_txn = max(txns_time_stamps)
-        #     last_time_txn = min(txns_time_stamps)
-        # else:
-        #     first_time_txn, last_time_txn = 0, 0
-
-        # wallet_life_time = (first_time_txn-last_time_txn)*1000
-
-        normal_txns_sent = list(filter(sender, self.normal_txns))
-
-        normal_txns_received = list(filter(
-            lambda txn: self._is_eq_addr(txn.from_, self.address),
-            self.normal_txns
-        ))
-
         return WalletReport(
             len(self.normal_txns),
-            len(list(filter(sender, self.normal_txns))),
-            len(list(filter(receiver, self.normal_txns))),
+            len(list(filter(self.sender, self.normal_txns))),
+            len(list(filter(self.receiver, self.normal_txns))),
             len(self.erc20_events),
-            len(list(filter(sender, self.erc20_events))),
-            len(list(filter(receiver, self.erc20_events))),
+            len(list(filter(self.sender, self.erc20_events))),
+            len(list(filter(self.receiver, self.erc20_events))),
             len(self.internal_txns),
             sum(map(eth_value, self.normal_txns)),
-            sum(map(eth_value, filter(sender, self.normal_txns))),
-            sum(map(eth_value, filter(receiver, self.normal_txns))),
+            sum(map(eth_value, filter(self.sender, self.normal_txns))),
+            sum(map(eth_value, filter(self.receiver, self.normal_txns))),
             sum(map(erc20_value, self.erc20_events)),
-            sum(map(erc20_value, filter(sender, self.erc20_events))),
-            sum(map(erc20_value, filter(receiver, self.erc20_events))),
+            sum(map(erc20_value, filter(self.sender, self.erc20_events))),
+            sum(map(erc20_value, filter(self.receiver, self.erc20_events))),
             sum(map(erc20_value, filter(stable_coin, self.erc20_events))),
             sum(
                 map(erc20_value, filter(
-                    sender, filter(stable_coin, self.erc20_events)
+                    self.sender, filter(stable_coin, self.erc20_events)
                 ))
             ),
             sum(
                 map(erc20_value, filter(
-                    receiver, filter(stable_coin, self.erc20_events)
+                    self.receiver, filter(stable_coin, self.erc20_events)
                 ))
             ),
             f_txn_time,
@@ -320,25 +262,8 @@ class Wallet:
             *self._get_statistic_time_btw_txns(self.normal_txns),
             *self._get_statistic_time_btw_txns(self.erc20_events),
             *self._get_statistic_time_btw_txns(self.erc20_events+self.normal_txns),
-
-
-            # len(self.internal_txns),
-            # len(self.erc20_events),
-            # self._eth_volume(self.normal_txns),
-            # self._eth_volume(sent_txns),
-            # self._eth_volume(received_txns),
-            # *self._get_statistic_time_btw_txns(self.normal_txns),
-            # wallet_life_time,
-            # first_time_txn,
-            # last_time_txn,
-            # # TODO
-            # 0,
-            # len(uniq_wallets),
-            # len(uniq_smrt_cntrs),
-            # len(uniq_erc20_smrt_cntrs),
-            # len(uniq_erc20_wallets),
-            # len(sent_txns),
-            # len(received_txns),
-            # *self._get_statistic_time_btw_txns(self.erc20_events),
-            # *self._get_stable_coin_info()
+            len(self._uniq_addr(self.normal_txns_interaction[0])),
+            len(self._uniq_addr(self.normal_txns_interaction[1])),
+            len(self._uniq_addr(self.erc20_txns_interaction[0])),
+            len(self._uniq_addr(self.erc20_txns_interaction[1])),
         )
