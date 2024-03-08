@@ -40,8 +40,8 @@ class WalletReport:
     Avg_Time_Btw_ERC20_Txns: int
     Max_Time_Btw_ERC20_Txns: int
     Min_Time_Btw_Txns: int
-    Min_Time_Btw_Txns: int
-    Min_Time_Btw_Txns: int
+    Avg_Time_Btw_Txns: int
+    Max_Time_Btw_Txns: int
     # First_Time_Txn: int
     # Last_Time_Txn: int
     # Deployed_SmrtCnts: int
@@ -219,29 +219,6 @@ class Wallet:
             f_txn_time = txns_timestamps[0]
             l_txn_time = txns_timestamps[-1]
 
-        # self._get_stable_coin_info()
-
-        # sent_txns = list(
-        #     filter(
-        #         lambda txn: self._is_eq_addr(txn.from_, self.address),
-        #         self.normal_txns
-        #     )
-        # )
-
-        # received_txns = list(
-        #     filter(
-        #         lambda txn: self._is_eq_addr(txn.to_, self.address),
-        #         self.normal_txns
-        #     )
-        # )
-
-        # txns_time_stamps = list(
-        #     map(
-        #         lambda txn: int(txn.time_stamp),
-        #         self.normal_txns+self.internal_txns+self.erc20_events
-        #     )
-        # )
-
         # uniq_smrt_cntrs = set(
         #     map(
         #         lambda txn: txn.to_,
@@ -342,7 +319,7 @@ class Wallet:
             (l_txn_time-f_txn_time)*1000,
             *self._get_statistic_time_btw_txns(self.normal_txns),
             *self._get_statistic_time_btw_txns(self.erc20_events),
-            *self._get_statistic_time_btw_txns(self.erc20_events+normal_txns),
+            *self._get_statistic_time_btw_txns(self.erc20_events+self.normal_txns),
 
 
             # len(self.internal_txns),
