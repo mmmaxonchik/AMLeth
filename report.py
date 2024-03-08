@@ -30,15 +30,18 @@ class WalletReport:
     Stable_Coin_Volume: float
     Sent_Stable_Coin: float
     Received_Stable_Coin: float
-    # Internal_Txns: int
-    # ERC20_txns: int
-    # Eth_Volume: float
-    # Sent_Eth: float
-    # Received_Eth: float
-    # Min_Time_Btw_Txns: int
-    # Avg_Time_Btw_Txns: int
-    # Max_Time_Btw_Txns: int
-    # Wallet_LifeTime: int
+    First_Txn_Timestamp: int
+    Last_Txn_Timestamp: int
+    Wallet_LifeTime: int
+    Min_Time_Btw_Normal_Txns: int
+    Avg_Time_Btw_Normal_Txns: int
+    Max_Time_Btw_Normal_Txns: int
+    Min_Time_Btw_ERC20_Txns: int
+    Avg_Time_Btw_ERC20_Txns: int
+    Max_Time_Btw_ERC20_Txns: int
+    Min_Time_Btw_Txns: int
+    Min_Time_Btw_Txns: int
+    Min_Time_Btw_Txns: int
     # First_Time_Txn: int
     # Last_Time_Txn: int
     # Deployed_SmrtCnts: int
@@ -138,33 +141,30 @@ class Wallet:
             map(lambda txn: self._wei_to_eth(int(txn.value)), self.normal_txns), 0
         )
 
-    def _get_statistic_time_btw_txns(self, txns_list: Sequence[Transaction | ERC20TransferEvent]) -> Tuple[int, int, int]:
-        txns_timestamps = list(map(
-            lambda txn: int(txn.time_stamp),
-            txns_list
-        ))
+    @staticmethod
+    def _get_txns_timestamps(txns_list: Sequence[Transaction | ERC20TransferEvent]):
+        txns_timestamps = list(map(lambda txn: int(txn.time_stamp), txns_list))
         txns_timestamps.sort()
+        return txns_timestamps
+
+    def _get_statistic_time_btw_txns(self, txns_list: Sequence[Transaction | ERC20TransferEvent]) -> Tuple[int, int, int]:
+        txns_timestamps = self._get_txns_timestamps(txns_list)
 
         if len(txns_timestamps) < 2:
             return (0, 0, 0)
 
-        max_time = txns_timestamps[1]-txns_timestamps[0]
-        min_time = max_time
-        for i in range(0, len(txns_timestamps)):
-            if i == len(txns_timestamps)-1:
-                break
-            it_res = txns_timestamps[i+1]-txns_timestamps[i]
-            if min_time > it_res:
-                min_time = it_res
-            it_res = txns_timestamps[i+1]-txns_timestamps[i]
-            if max_time < it_res:
-                max_time = it_res
+        min_time, avg_time, max_time = max(txns_timestamps), 0, 0
 
-        avg_time = 0
         for i in range(len(txns_timestamps)-1, -1, -1):
             if i == 0:
                 break
-            avg_time += txns_timestamps[i]-txns_timestamps[i-1]
+            diff = txns_timestamps[i]-txns_timestamps[i-1]
+
+            avg_time += diff
+            if min_time >= diff:
+                min_time = diff
+            else:
+                max_time = diff
         avg_time /= len(txns_timestamps)
 
         min_time, avg_time, max_time = map(
@@ -208,6 +208,16 @@ class Wallet:
 
         def erc20_value(txn: ERC20TransferEvent): return int(
             txn.value)/10**int(txn.token_decimal)
+
+        # Constant data
+        txns_timestamps = self._get_txns_timestamps(
+            self.normal_txns+self.erc20_events
+        )
+
+        f_txn_time, l_txn_time = 0, 0
+        if len(txns_timestamps) >= 1:
+            f_txn_time = txns_timestamps[0]
+            l_txn_time = txns_timestamps[-1]
 
         # self._get_stable_coin_info()
 
@@ -327,6 +337,12 @@ class Wallet:
                     receiver, filter(stable_coin, self.erc20_events)
                 ))
             ),
+            f_txn_time,
+            l_txn_time,
+            (l_txn_time-f_txn_time)*1000,
+            *self._get_statistic_time_btw_txns(self.normal_txns),
+            *self._get_statistic_time_btw_txns(self.erc20_events),
+            *self._get_statistic_time_btw_txns(self.erc20_events+normal_txns),
 
 
             # len(self.internal_txns),
