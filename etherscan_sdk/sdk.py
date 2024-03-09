@@ -4,6 +4,11 @@ from yarl import URL
 from etherscan_sdk.sdk_type import ERC20TransferEvent, InternalTransaction, NormalTransaction
 
 
+class TooManyRequestError(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
 class EtherScanApi:
     api_url = URL("https://api.etherscan.io/api")
 
@@ -14,6 +19,13 @@ class EtherScanApi:
 class Account(EtherScanApi):
     module = "account"
     request_headers = {"Accept": "application/json"}
+
+    @staticmethod
+    def handle_response(res):
+        if res["message"] == "NOTOK":
+            raise TooManyRequestError()
+        else:
+            return res
 
     def __init__(self, api_key: str, address: str) -> None:
         super().__init__(api_key)
@@ -39,7 +51,7 @@ class Account(EtherScanApi):
         })
 
         response = await self._send_request(url)
-        return int(response["result"])/1e18
+        return int(self.handle_response(response)["result"])/1e18
 
     async def get_normal_transactions(self):
         action: str = "txlist"
@@ -48,7 +60,7 @@ class Account(EtherScanApi):
         })
 
         response = await self._send_request(url)
-        return list(map(lambda txn: NormalTransaction.from_dict(txn), response["result"]))
+        return list(map(lambda txn: NormalTransaction.from_dict(txn), self.handle_response(response)["result"]))
 
     async def get_internal_transactions(self):
         action: str = "txlistinternal"
@@ -57,7 +69,7 @@ class Account(EtherScanApi):
         })
 
         response = await self._send_request(url)
-        return list(map(lambda txn: InternalTransaction.from_dict(txn), response["result"]))
+        return list(map(lambda txn: InternalTransaction.from_dict(txn), self.handle_response(response)["result"]))
 
     async def get_erc20_transfer_events(self):
         action: str = "tokentx"
@@ -66,4 +78,4 @@ class Account(EtherScanApi):
         })
 
         response = await self._send_request(url)
-        return list(map(lambda txn: ERC20TransferEvent.from_dict(txn), response["result"]))
+        return list(map(lambda txn: ERC20TransferEvent.from_dict(txn), self.handle_response(response)["result"]))

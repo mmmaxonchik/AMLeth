@@ -1,10 +1,11 @@
 
 import asyncio
+from dataclasses import fields
 from functools import reduce
 import os
 from random import randint
 from sre_constants import SUCCESS
-from typing import List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 from aiohttp import ClientError
 
 from attr import dataclass
@@ -16,6 +17,7 @@ from etherscan_sdk.sdk_type import ERC20TransferEvent, NormalTransaction, Transa
 
 @dataclass
 class WalletReport:
+    Address: str
     # Countable data
     Normal_Txns: int
     Normal_Sent_txns: int
@@ -91,8 +93,7 @@ class Wallet:
                 code = await w3.eth.get_code(checksum_addr)
                 code = code.hex()
                 success = True
-            except Exception as err:
-                print(err, type(err))
+            except ClientError:
                 await asyncio.sleep(2)
 
         return code == "0x"
@@ -232,6 +233,7 @@ class Wallet:
             l_txn_time = txns_timestamps[-1]
 
         return WalletReport(
+            self.address,
             len(self.normal_txns),
             len(list(filter(self.sender, self.normal_txns))),
             len(list(filter(self.receiver, self.normal_txns))),
