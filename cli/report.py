@@ -1,5 +1,5 @@
 from typing import List, Sequence, Tuple
-from web3 import AsyncWeb3
+from web3 import Web3
 
 from etherscan_sdk.sdk_type import (
     ERC20TransferEvent,
@@ -14,16 +14,19 @@ all_txns_type = Transaction | ERC20TransferEvent
 
 
 class Wallet:
-    def __init__(self, account: Account, provider: AsyncWeb3):
+    def __init__(self, account: Account, provider: Web3):
         self.address = account.address
         self.account = account
         self.provider = provider
 
-    async def _is_wallet(self, address: str):
-        checksum_addr = self.provider.to_checksum_address(address)
-        code = await self.provider.eth.get_code(checksum_addr)
-        code = code.hex()
-        return code == "0x"
+    def _is_wallet(self, address: str):
+        try:
+            checksum_addr = self.provider.to_checksum_address(address)
+            code = self.provider.eth.get_code(checksum_addr)
+            code = code.hex()
+            return code == "0x"
+        except:
+            return True
 
     @staticmethod
     def _is_eq_addr(addr1: str, addr2: str):
@@ -85,6 +88,12 @@ class Wallet:
         sender_normal_txns = list(filter(self.sender, normal_txns))
         receiver_normal_txns = list(filter(self.receiver, normal_txns))
 
+        smrt_sender_normal_txns = list(filter(lambda txn: self._is_wallet(txn.to_), sender_normal_txns)) 
+        smrt_sender_normal_txns_values = list(map(
+            lambda txn: round(self._wei_to_eth(int(txn.value)), 6),
+            smrt_sender_normal_txns
+        ))
+
         receives_txns_values = list(map(
             lambda txn: round(self._wei_to_eth(int(txn.value)), 6),
             receiver_normal_txns
@@ -104,9 +113,13 @@ class Wallet:
         ts_receiver_statistic = self._get_statistic_time_btw_txns(
             receiver_normal_txns)
 
-        erc20_events = await self.get_erc20_events()
+        erc20_events = await self.get_erc20_events()        
         sender_erc20_txns = list(filter(self.sender, erc20_events))
         receiver_erc20_txns = list(filter(self.receiver, erc20_events))
+
+        smrt_sender_erc20_txns = list(filter(lambda txn: self._is_wallet(txn.to_), sender_erc20_txns)) 
+        smrt_receiver_erc20_txns = list(filter(lambda txn: self._is_wallet(txn.from_), receiver_erc20_txns)) 
+
 
         send_txns_stat_erc20_time = self._get_statistic_time_btw_txns(
             sender_erc20_txns
@@ -141,7 +154,7 @@ class Wallet:
         feature_result.append(len(sender_normal_txns))
         # Received_tnx
         feature_result.append(len(receiver_normal_txns))
-        # Number_of_Created_Contracts - TODO
+        # Number_of_Created_Contracts
         feature_result.append(0)
         # Unique_Received_From_Addresses
         feature_result.append(
@@ -176,20 +189,27 @@ class Wallet:
             feature_result.append(0)
             feature_result.append(0)
 
-        # Min_Value_Sent_To_Contract - TODO
-        feature_result.append(0)
-        # Max_Value_Sent_To_Contract - TODO
-        feature_result.append(0)
-        # Avg_Value_Sent_To_Contract - TODO
-        feature_result.append(0)
-        # Total_Transactions(Including_Tnx_to_Create_Contract) - TODO
-        feature_result.append(len(normal_txns)+0)
+
+        if len(sends_txns_values) > 0:
+            # Min_Value_Sent_To_Contract
+            feature_result.append(min(smrt_sender_normal_txns_values))
+            # Max_Value_Sent_To_Contract
+            feature_result.append(max(smrt_sender_normal_txns_values))
+            # Avg_Value_Sent_To_Contract
+            feature_result.append(sum(smrt_sender_normal_txns_values)/len(smrt_sender_normal_txns_values))
+        else:
+            feature_result.append(0)
+            feature_result.append(0)
+            feature_result.append(0)
+
+        # Total_Transactions(Including_Tnx_to_Create_Contract)
+        feature_result.append(len(normal_txns))
         # Total_Ether_Sent
         feature_result.append(total_send)
         # Total_Ether_Received
         feature_result.append(total_received)
-        # Total_Ether_Sent_Contracts - TODO
-        feature_result.append(0)
+        # Total_Ether_Sent_Contracts
+        feature_result.append(sum(smrt_sender_normal_txns_values))
         # Total_Ether_Balance
         feature_result.append(total_received - total_send)
         # Total_ERC20_Tnxs
@@ -214,14 +234,14 @@ class Wallet:
         feature_result.append(
             len(set(map(lambda txn: txn.from_, receiver_erc20_txns)))
         )
-        # ERC20_Uniq_Rec_Contract_Addr - TODO
-        feature_result.append(0)
+        # ERC20_Uniq_Rec_Contract_Addr
+        feature_result.append(len(set(map(lambda txn: txn.from_, smrt_receiver_erc20_txns))))
         # ERC20_Avg_Time_Between_Sent_Tnx
         feature_result.append(send_txns_stat_erc20_time[1]/60)
         # ERC20_Avg_Time_Between_Rec_Tnx
         feature_result.append(rec_txns_stat_erc20_time[1]/60)
-        # ERC20_Avg_Time_Between_Contract_Tnx - TODO
-        feature_result.append(0)
+        # ERC20_Avg_Time_Between_Contract_Tnx
+        feature_result.append(self._get_statistic_time_btw_txns(smrt_sender_erc20_txns+smrt_receiver_erc20_txns)[1]/60)
 
         if len(rec_tokens) > 0:
             # ERC20_Min_Val_Rec

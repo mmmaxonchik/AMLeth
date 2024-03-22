@@ -4,7 +4,7 @@ import os
 import numpy as np
 import xgboost
 
-from web3 import AsyncWeb3
+from web3 import HTTPProvider
 from report import Wallet
 from etherscan_sdk.sdk import Account
 from compare_clis.cryptowallet_risk_scoring.januus_riskreport.client import riskreport_on_entity
@@ -32,9 +32,7 @@ async def main():
         os._exit(1)
 
     account = Account(ETHERSCAN_API_KEY, address)
-    provider = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(
-        f"https://mainnet.infura.io/v3/{INFURA_API_KEY}")
-    )
+    provider = HTTPProvider(f"https://mainnet.infura.io/v3/{INFURA_API_KEY}") 
 
     wallet = Wallet(account, provider)
 
